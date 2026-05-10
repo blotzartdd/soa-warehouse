@@ -1,0 +1,27 @@
+[package]
+name = "consumer"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "consumer"
+path = "src/main.rs"
+
+[dependencies]
+rdkafka = { version = "0.36", features = ["tokio", "cmake-build"] }
+scylla = { version = "1.6", features = ["chrono-04"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+anyhow = "1"
+dotenvy = "0.15"
+axum = "0.7"
+prometheus = "0.13"
+lazy_static = "1"
+dashmap = "6"
+apache-avro = "0.21"
+reqwest = { version = "0.12", features = ["json"] }

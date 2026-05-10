@@ -1,0 +1,182 @@
+version: "3.8"
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+
+  cassandra-1:
+    image: cassandra:4.1
+    ports:
+      - "9042:9042"
+    environment:
+      CASSANDRA_CLUSTER_NAME: warehouse-cluster
+      CASSANDRA_DC: dc1
+      CASSANDRA_RACK: rack1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      MAX_HEAP_SIZE: "512M"
+      HEAP_NEWSIZE: "128M"
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
+      interval: 30s
+      timeout: 10s
+      retries: 15
+      start_period: 90s
+    volumes:
+      - cassandra1_data:/var/lib/cassandra
+
+  cassandra-2:
+    image: cassandra:4.1
+    depends_on:
+      cassandra-1:
+        condition: service_healthy
+    environment:
+      CASSANDRA_CLUSTER_NAME: warehouse-cluster
+      CASSANDRA_DC: dc1
+      CASSANDRA_RACK: rack1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_SEEDS: cassandra-1
+      MAX_HEAP_SIZE: "512M"
+      HEAP_NEWSIZE: "128M"
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
+      interval: 30s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+    volumes:
+      - cassandra2_data:/var/lib/cassandra
+
+  cassandra-3:
+    image: cassandra:4.1
+    depends_on:
+      cassandra-2:
+        condition: service_healthy
+    environment:
+      CASSANDRA_CLUSTER_NAME: warehouse-cluster
+      CASSANDRA_DC: dc1
+      CASSANDRA_RACK: rack1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_SEEDS: cassandra-1
+      MAX_HEAP_SIZE: "512M"
+      HEAP_NEWSIZE: "128M"
+    healthcheck:
+      test: ["CMD", "cqlsh", "-e", "describe keyspaces"]
+      interval: 30s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+    volumes:
+      - cassandra3_data:/var/lib/cassandra
+
+  consumer:
+    build:
+      context: .
+      dockerfile: consumer/Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+      cassandra-1:
+        condition: service_healthy
+    ports:
+      - "9090:9090"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_GROUP_ID: warehouse-state-consumer
+      KAFKA_TOPIC: warehouse-events
+      KAFKA_DLQ_TOPIC: warehouse-events-dlq
+      CASSANDRA_HOSTS: cassandra-1,cassandra-2,cassandra-3
+      CASSANDRA_KEYSPACE: warehouse
+      CASSANDRA_CONSISTENCY_WRITE: QUORUM
+      CASSANDRA_CONSISTENCY_READ: ONE
+      METRICS_PORT: 9090
+      RUST_LOG: info
+    restart: on-failure
+
+  producer:
+    build:
+      context: .
+      dockerfile: producer/Dockerfile
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: warehouse-events
+      PORT: 8080
+      RUST_LOG: info
+    restart: on-failure
+
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=7d"
+    depends_on:
+      - consumer
+
+  grafana:
+    image: grafana/grafana:10.1.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  cassandra1_data:
+  cassandra2_data:
+  cassandra3_data:
+  grafana_data:
