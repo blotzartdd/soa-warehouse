@@ -45,6 +45,12 @@ services:
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
       SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/subjects"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   cassandra-1:
     image: cassandra:4.1
@@ -130,6 +136,7 @@ services:
       CASSANDRA_KEYSPACE: warehouse
       CASSANDRA_CONSISTENCY_WRITE: QUORUM
       CASSANDRA_CONSISTENCY_READ: ONE
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
       METRICS_PORT: 9090
       RUST_LOG: info
     restart: on-failure
@@ -141,11 +148,14 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      schema-registry:
+        condition: service_healthy
     ports:
       - "8080:8080"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_TOPIC: warehouse-events
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
       PORT: 8080
       RUST_LOG: info
     restart: on-failure

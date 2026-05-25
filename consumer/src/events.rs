@@ -104,33 +104,73 @@ impl WarehouseEvent {
     }
 }
 
-#[derive(serde::Deserialize)]
-struct AvroProductReceived {
-    event_id: String,
-    event_type: String,
-    timestamp: String,
-    product_id: String,
-    zone_id: String,
-    quantity: i64,
-    #[serde(default)]
-    supplier_id: Option<String>,
-}
-
 pub fn decode_avro_event(data: &[u8], schema: &apache_avro::Schema) -> anyhow::Result<WarehouseEvent> {
-    let rec: AvroProductReceived = apache_avro::from_avro_datum(schema, &mut &data[..], None)?;
-    let timestamp = rec.timestamp.parse::<DateTime<Utc>>()
+    use apache_avro::types::Value;
+
+    let value = apache_avro::from_avro_datum(schema, &mut &data[..], None)?;
+    let fields = match value {
+        Value::Record(f) => f,
+        _ => anyhow::bail!("expected Avro record"),
+    };
+    let mut map: std::collections::HashMap<String, Value> = fields.into_iter().collect();
+
+    let event_id = avro_str(&mut map, "event_id")?;
+    let event_type = avro_str(&mut map, "event_type")?;
+    let timestamp_str = avro_str(&mut map, "timestamp")?;
+    let timestamp = timestamp_str
+        .parse::<DateTime<Utc>>()
         .map_err(|e| anyhow::anyhow!("invalid timestamp in avro: {}", e))?;
+    let product_id = avro_str(&mut map, "product_id")?;
+    let zone_id = avro_str(&mut map, "zone_id")?;
+    let quantity = avro_long(&mut map, "quantity")?;
+    let supplier_id = avro_optional_str(&mut map, "supplier_id");
+
     let payload = serde_json::json!({
-        "product_id": rec.product_id,
-        "zone_id": rec.zone_id,
-        "quantity": rec.quantity,
-        "supplier_id": rec.supplier_id,
+        "product_id": product_id,
+        "zone_id": zone_id,
+        "quantity": quantity,
+        "supplier_id": supplier_id,
     });
     Ok(WarehouseEvent {
-        event_id: rec.event_id,
-        event_type: rec.event_type,
+        event_id,
+        event_type,
         timestamp,
         sequence_number: None,
         payload,
     })
+}
+
+fn avro_str(
+    map: &mut std::collections::HashMap<String, apache_avro::types::Value>,
+    key: &str,
+) -> anyhow::Result<String> {
+    match map.remove(key) {
+        Some(apache_avro::types::Value::String(s)) => Ok(s),
+        other => anyhow::bail!("field '{}': expected string, got {:?}", key, other),
+    }
+}
+
+fn avro_long(
+    map: &mut std::collections::HashMap<String, apache_avro::types::Value>,
+    key: &str,
+) -> anyhow::Result<i64> {
+    match map.remove(key) {
+        Some(apache_avro::types::Value::Long(n)) => Ok(n),
+        Some(apache_avro::types::Value::Int(n)) => Ok(n as i64),
+        other => anyhow::bail!("field '{}': expected long, got {:?}", key, other),
+    }
+}
+
+fn avro_optional_str(
+    map: &mut std::collections::HashMap<String, apache_avro::types::Value>,
+    key: &str,
+) -> Option<String> {
+    match map.remove(key) {
+        Some(apache_avro::types::Value::Union(_, boxed)) => match *boxed {
+            apache_avro::types::Value::String(s) => Some(s),
+            _ => None,
+        },
+        Some(apache_avro::types::Value::String(s)) => Some(s),
+        _ => None,
+    }
 }

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::Utc;
-use dashmap::DashMap;
 use rdkafka::consumer::{BaseConsumer, CommitMode, Consumer, StreamConsumer};
+use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
 use rdkafka::message::Message;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::ClientConfig;
@@ -47,15 +47,12 @@ pub async fn run_consumer(
 
     KAFKA_HEALTHY.store(true, std::sync::atomic::Ordering::Relaxed);
 
-    let committed_offsets: Arc<DashMap<i32, i64>> = Arc::new(DashMap::new());
-
     {
         let bootstrap = config.kafka_bootstrap_servers.clone();
-        let group = format!("{}-lag-monitor", config.kafka_group_id);
+        let group = config.kafka_group_id.clone();
         let topic = config.kafka_topic.clone();
-        let offsets = committed_offsets.clone();
         tokio::task::spawn_blocking(move || {
-            run_lag_monitor(bootstrap, group, topic, offsets);
+            run_lag_monitor(bootstrap, group, topic);
         });
     }
 
@@ -79,7 +76,6 @@ pub async fn run_consumer(
                     None => {
                         warn!(partition, offset, "empty message, skipping");
                         consumer.commit_message(&msg, CommitMode::Async)?;
-                        committed_offsets.insert(partition, offset);
                         continue;
                     }
                 };
@@ -109,7 +105,6 @@ pub async fn run_consumer(
                                         )
                                         .await;
                                         consumer.commit_message(&msg, CommitMode::Async)?;
-                                        committed_offsets.insert(partition, offset);
                                         continue;
                                     }
                                 }
@@ -133,7 +128,6 @@ pub async fn run_consumer(
                                 )
                                 .await;
                                 consumer.commit_message(&msg, CommitMode::Async)?;
-                                committed_offsets.insert(partition, offset);
                                 continue;
                             }
                         }
@@ -153,7 +147,6 @@ pub async fn run_consumer(
                                 )
                                 .await;
                                 consumer.commit_message(&msg, CommitMode::Async)?;
-                                committed_offsets.insert(partition, offset);
                                 continue;
                             }
                         }
@@ -177,7 +170,6 @@ pub async fn run_consumer(
                         timer.observe_duration();
                         EVENTS_PROCESSED.with_label_values(&[&event_type]).inc();
                         consumer.commit_message(&msg, CommitMode::Async)?;
-                        committed_offsets.insert(partition, offset);
                     }
                     Err(e) => {
                         timer.observe_duration();
@@ -206,7 +198,6 @@ pub async fn run_consumer(
                         )
                         .await;
                         consumer.commit_message(&msg, CommitMode::Async)?;
-                        committed_offsets.insert(partition, offset);
                     }
                 }
             }
@@ -224,12 +215,7 @@ fn classify_error(msg: &str) -> &'static str {
     }
 }
 
-fn run_lag_monitor(
-    bootstrap: String,
-    group: String,
-    topic: String,
-    committed: Arc<DashMap<i32, i64>>,
-) {
+fn run_lag_monitor(bootstrap: String, group: String, topic: String) {
     let consumer: BaseConsumer = match ClientConfig::new()
         .set("bootstrap.servers", &bootstrap)
         .set("group.id", &group)
@@ -243,23 +229,51 @@ fn run_lag_monitor(
     };
 
     loop {
-        std::thread::sleep(Duration::from_secs(15));
-        if let Ok(metadata) = consumer.fetch_metadata(Some(&topic), Duration::from_secs(5)) {
-            for t in metadata.topics() {
-                for p in t.partitions() {
-                    let pid = p.id();
-                    if let Ok((_, high)) =
-                        consumer.fetch_watermarks(&topic, pid, Duration::from_secs(5))
-                    {
-                        let current = committed.get(&pid).map(|v| *v).unwrap_or(0);
-                        let lag = (high - current - 1).max(0) as f64;
-                        CONSUMER_LAG
-                            .with_label_values(&[&topic, &pid.to_string()])
-                            .set(lag);
-                    }
+        let timeout = Duration::from_secs(5);
+
+        let metadata = match consumer.fetch_metadata(Some(&topic), timeout) {
+            Ok(m) => m,
+            Err(e) => {
+                warn!("lag monitor: fetch_metadata error: {}", e);
+                std::thread::sleep(Duration::from_secs(15));
+                continue;
+            }
+        };
+
+        for t in metadata.topics() {
+            let mut tpl = TopicPartitionList::new();
+            for p in t.partitions() {
+                tpl.add_partition(&topic, p.id());
+            }
+
+            if consumer.assign(&tpl).is_err() {
+                continue;
+            }
+
+            let committed = match consumer.committed(timeout) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("lag monitor: committed() error: {}", e);
+                    continue;
+                }
+            };
+
+            for elem in committed.elements() {
+                let pid = elem.partition();
+                let committed_off = match elem.offset() {
+                    Offset::Offset(o) => o,
+                    _ => 0,
+                };
+                if let Ok((_, high)) = consumer.fetch_watermarks(&topic, pid, timeout) {
+                    let lag = (high - committed_off).max(0) as f64;
+                    CONSUMER_LAG
+                        .with_label_values(&[&topic, &pid.to_string()])
+                        .set(lag);
                 }
             }
         }
+
+        std::thread::sleep(Duration::from_secs(15));
     }
 }
 
