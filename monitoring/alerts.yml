@@ -1,0 +1,69 @@
+groups:
+  - name: warehouse.service
+    rules:
+
+      - alert: HighEventProcessingLatency
+        expr: >
+          histogram_quantile(0.95,
+            sum(rate(event_processing_duration_seconds_bucket[5m])) by (le)
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Event processing p95 latency above 1 s"
+          description: >
+            p95 event processing latency is {{ $value | humanizeDuration }},
+            which exceeds the SLO threshold of 500 ms and is past the failure
+            boundary of 1 s defined in tests/README.md.
+
+      - alert: HighCassandraErrorRate
+        expr: >
+          sum(rate(cassandra_write_errors_total[5m]))
+          /
+          (sum(rate(events_processed_total[5m])) + sum(rate(cassandra_write_errors_total[5m])) + 0.0001)
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Cassandra write error rate above 5%"
+          description: >
+            {{ $value | humanizePercentage }} of events are failing to persist
+            in Cassandra (threshold 5%).  Check consumer logs.
+
+      - alert: HighKafkaConsumerLag
+        expr: sum(consumer_lag) > 1000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Kafka consumer lag above 1000 messages"
+          description: >
+            Consumer lag is {{ $value | humanize }} messages.
+            The consumer may be overloaded or Cassandra is slow.
+
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scrape target {{ $labels.job }} is down"
+          description: >
+            Prometheus cannot reach {{ $labels.job }} (instance {{ $labels.instance }}).
+            Consumer or infrastructure component may have crashed.
+
+  - name: warehouse.infrastructure
+    rules:
+
+      - alert: KafkaBrokerDown
+        expr: kafka_brokers < 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No Kafka brokers available"
+          description: >
+            kafka_brokers reported {{ $value }}.
+            The warehouse system cannot produce or consume events.

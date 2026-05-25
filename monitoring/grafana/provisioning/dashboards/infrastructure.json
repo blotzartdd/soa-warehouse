@@ -1,0 +1,162 @@
+{
+  "title": "Warehouse Infrastructure",
+  "uid": "warehouse-infra",
+  "schemaVersion": 36,
+  "version": 1,
+  "refresh": "15s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Kafka Consumer Lag (total)",
+      "description": "Sum of consumer lag across all partitions from kafka-exporter.  High lag means the consumer is falling behind.",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(kafka_consumer_group_lag_sum) by (consumergroup)",
+          "legendFormat": "{{consumergroup}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(consumer_lag) by (topic)",
+          "legendFormat": "app: {{topic}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green",  "value": null},
+              {"color": "yellow", "value": 100},
+              {"color": "red",    "value": 1000}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Kafka Brokers",
+      "description": "Number of active Kafka brokers.  Should be 1 in dev; >= 3 in production.",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "kafka_brokers",
+          "legendFormat": "brokers",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red",   "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Kafka Consumer Group Members",
+      "description": "Active consumers in the warehouse-state-consumer group.",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(kafka_consumer_group_members{consumergroup=\"warehouse-state-consumer\"})",
+          "legendFormat": "members",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red",   "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Kafka Partition Lag per Partition",
+      "description": "Per-partition lag — useful to spot uneven distribution across partitions.",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "targets": [
+        {
+          "expr": "kafka_consumer_group_lag{consumergroup=\"warehouse-state-consumer\"}",
+          "legendFormat": "partition={{partition}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "id": 5,
+      "title": "Cassandra Write Error Rate",
+      "description": "Rate of Cassandra write errors per second.  Bottleneck indicator.",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "sum(rate(cassandra_write_errors_total[1m])) by (operation)",
+          "legendFormat": "errors/s ({{operation}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red",   "value": 0.01}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Scrape Target Availability",
+      "description": "1 = target up, 0 = target down.  Covers consumer and kafka-exporter.",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "targets": [
+        {
+          "expr": "up",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red",   "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

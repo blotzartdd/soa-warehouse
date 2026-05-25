@@ -364,3 +364,36 @@ async fn build_consumer_with_retry(config: &Config) -> Result<StreamConsumer> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_validation_error() {
+        assert_eq!(classify_error("VALIDATION_ERROR: quantity must be positive"), "VALIDATION_ERROR");
+    }
+
+    #[test]
+    fn classify_business_error() {
+        assert_eq!(classify_error("BUSINESS_ERROR: insufficient available qty"), "BUSINESS_ERROR");
+    }
+
+    #[test]
+    fn classify_unknown_is_processing_error() {
+        assert_eq!(classify_error("connection timed out"), "PROCESSING_ERROR");
+    }
+
+    #[test]
+    fn classify_empty_string_is_processing_error() {
+        assert_eq!(classify_error(""), "PROCESSING_ERROR");
+    }
+
+    #[test]
+    fn classify_validation_prefix_takes_priority() {
+        assert_eq!(
+            classify_error("VALIDATION_ERROR: also has BUSINESS_ERROR substring"),
+            "VALIDATION_ERROR",
+        );
+    }
+}

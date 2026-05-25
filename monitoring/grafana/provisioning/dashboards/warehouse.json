@@ -2,12 +2,13 @@
   "title": "Warehouse Consumer",
   "uid": "warehouse-consumer",
   "schemaVersion": 36,
-  "version": 1,
+  "version": 2,
   "refresh": "10s",
   "panels": [
     {
       "id": 1,
       "title": "Consumer Lag by Partition",
+      "description": "Kafka consumer lag per partition.  Should trend to 0 under normal operation.",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
       "targets": [
@@ -16,46 +17,208 @@
           "legendFormat": "partition={{partition}}",
           "refId": "A"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green",  "value": null},
+              {"color": "yellow", "value": 100},
+              {"color": "red",    "value": 1000}
+            ]
+          }
+        }
+      }
     },
     {
       "id": 2,
-      "title": "Events Processed per Second",
+      "title": "Event Throughput (events/s)",
+      "description": "Rate of successfully processed events per second, broken down by event type.",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
       "targets": [
         {
-          "expr": "rate(events_processed_total[1m])",
+          "expr": "sum(rate(events_processed_total[1m])) by (event_type)",
           "legendFormat": "{{event_type}}",
           "refId": "A"
         }
-      ]
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
     },
     {
       "id": 3,
-      "title": "Cassandra Write Errors (total)",
+      "title": "Cassandra Write Error Rate (errors/s)",
+      "description": "Rate of failed Cassandra writes.  Non-zero value indicates storage problems.",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
       "targets": [
         {
-          "expr": "cassandra_write_errors_total",
-          "legendFormat": "{{operation}}",
+          "expr": "sum(rate(cassandra_write_errors_total[1m])) by (operation)",
+          "legendFormat": "{{operation}} errors/s",
           "refId": "A"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red",   "value": 0.01}
+            ]
+          }
+        }
+      }
     },
     {
       "id": 4,
-      "title": "Event Processing Duration (p99)",
+      "title": "Event Processing Latency (p50 / p95 / p99)",
+      "description": "Histogram quantiles of event processing time (Kafka receive → Cassandra write commit).",
       "type": "timeseries",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, rate(event_processing_duration_seconds_bucket[1m]))",
-          "legendFormat": "p99 {{event_type}}",
+          "expr": "histogram_quantile(0.50, sum(rate(event_processing_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(event_processing_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(event_processing_duration_seconds_bucket[1m])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green",  "value": null},
+              {"color": "yellow", "value": 0.5},
+              {"color": "red",    "value": 1.0}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Producer Request Throughput (req/s)",
+      "description": "HTTP requests per second to the producer API, labelled by endpoint.",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{job=\"warehouse-producer\"}[1m])) by (endpoint)",
+          "legendFormat": "{{endpoint}}",
           "refId": "A"
         }
-      ]
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "id": 9,
+      "title": "Producer p50 / p95 / p99 Latency",
+      "description": "HTTP request latency percentiles for the producer API.",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket{job=\"warehouse-producer\"}[1m])) by (le, endpoint))",
+          "legendFormat": "p50 {{endpoint}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"warehouse-producer\"}[1m])) by (le, endpoint))",
+          "legendFormat": "p95 {{endpoint}}",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket{job=\"warehouse-producer\"}[1m])) by (le, endpoint))",
+          "legendFormat": "p99 {{endpoint}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 5,
+      "title": "Error Rate (% of total events)",
+      "description": "Percentage of events that resulted in a Cassandra write error.  SLO: < 1%.",
+      "type": "gauge",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 16},
+      "targets": [
+        {
+          "expr": "100 * sum(rate(cassandra_write_errors_total[5m])) / (sum(rate(events_processed_total[5m])) + sum(rate(cassandra_write_errors_total[5m])) + 0.0001)",
+          "legendFormat": "error %",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green",  "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red",    "value": 5}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Events Processed (total)",
+      "description": "Cumulative event counter since consumer start.",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 8, "x": 8, "y": 16},
+      "targets": [
+        {
+          "expr": "sum(events_processed_total)",
+          "legendFormat": "total",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "id": 7,
+      "title": "Cassandra Write Errors (total)",
+      "description": "Cumulative Cassandra write error counter since consumer start.",
+      "type": "stat",
+      "gridPos": {"h": 4, "w": 8, "x": 16, "y": 16},
+      "targets": [
+        {
+          "expr": "sum(cassandra_write_errors_total)",
+          "legendFormat": "errors",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "red",   "value": 1}
+            ]
+          }
+        }
+      }
     }
   ]
 }
