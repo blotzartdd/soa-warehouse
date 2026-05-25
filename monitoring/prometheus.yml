@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers: []
+
+rule_files: []
+
+scrape_configs:
+  - job_name: warehouse-consumer
+    static_configs:
+      - targets: ["consumer:9090"]
