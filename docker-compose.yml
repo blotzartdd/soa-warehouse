@@ -160,17 +160,43 @@ services:
       RUST_LOG: info
     restart: on-failure
 
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "9308:9308"
+    command:
+      - --kafka.server=kafka:9092
+      - --web.listen-address=:9308
+    restart: on-failure
+
   prometheus:
     image: prom/prometheus:v2.47.0
     ports:
       - "9091:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-lifecycle"
     depends_on:
       - consumer
+      - kafka-exporter
+
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    depends_on:
+      - prometheus
 
   grafana:
     image: grafana/grafana:10.1.0

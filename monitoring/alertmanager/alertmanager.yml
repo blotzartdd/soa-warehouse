@@ -1,0 +1,27 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 10s
+  group_interval: 5m
+  repeat_interval: 1h
+  receiver: 'null'
+  routes:
+    - matchers:
+        - severity = "critical"
+      receiver: 'null'
+      group_wait: 5s
+
+receivers:
+  - name: 'null'
+    # No-op receiver: alerts are visible in the Alertmanager UI and Grafana
+    # without sending external notifications.  Replace with an email/slack
+    # receiver in production.
+
+inhibit_rules:
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ['alertname']

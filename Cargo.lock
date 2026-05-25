@@ -1316,6 +1316,8 @@ dependencies = [
  "axum",
  "chrono",
  "dotenvy",
+ "lazy_static",
+ "prometheus",
  "rdkafka",
  "reqwest",
  "serde",
