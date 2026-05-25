@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Wait until all required services are ready before running tests."""
 import sys
 import time
 import requests
 
-TIMEOUT = 600  # seconds total
-INTERVAL = 5   # seconds between polls
+TIMEOUT = 600
+INTERVAL = 5
 
 CHECKS = [
     {
@@ -43,7 +42,6 @@ def main():
     if not all_ok:
         print("One or more services failed to start in time.", file=sys.stderr)
         sys.exit(1)
-    # Extra buffer so Cassandra QUORUM is available (2+ nodes joined)
     print("Services up — waiting 30 s extra for Cassandra cluster quorum…")
     time.sleep(30)
     print("All services ready.")

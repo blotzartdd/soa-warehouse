@@ -2,7 +2,6 @@ groups:
   - name: warehouse.service
     rules:
 
-      # ── Latency ──────────────────────────────────────────────────────────
       - alert: HighEventProcessingLatency
         expr: >
           histogram_quantile(0.95,
@@ -18,7 +17,6 @@ groups:
             which exceeds the SLO threshold of 500 ms and is past the failure
             boundary of 1 s defined in tests/README.md.
 
-      # ── Error rate ───────────────────────────────────────────────────────
       - alert: HighCassandraErrorRate
         expr: >
           sum(rate(cassandra_write_errors_total[5m]))
@@ -34,7 +32,6 @@ groups:
             {{ $value | humanizePercentage }} of events are failing to persist
             in Cassandra (threshold 5%).  Check consumer logs.
 
-      # ── Consumer lag ─────────────────────────────────────────────────────
       - alert: HighKafkaConsumerLag
         expr: sum(consumer_lag) > 1000
         for: 5m
@@ -46,7 +43,6 @@ groups:
             Consumer lag is {{ $value | humanize }} messages.
             The consumer may be overloaded or Cassandra is slow.
 
-      # ── Availability ─────────────────────────────────────────────────────
       - alert: ServiceDown
         expr: up == 0
         for: 1m
@@ -61,7 +57,6 @@ groups:
   - name: warehouse.infrastructure
     rules:
 
-      # ── Kafka broker availability ─────────────────────────────────────────
       - alert: KafkaBrokerDown
         expr: kafka_brokers < 1
         for: 2m

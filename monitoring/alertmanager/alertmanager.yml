@@ -15,9 +15,6 @@ route:
 
 receivers:
   - name: 'null'
-    # No-op receiver: alerts are visible in the Alertmanager UI and Grafana
-    # without sending external notifications.  Replace with an email/slack
-    # receiver in production.
 
 inhibit_rules:
   - source_matchers:

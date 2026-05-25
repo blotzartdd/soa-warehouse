@@ -14,6 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev libssl-dev libsasl2-dev
+
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
@@ -37,7 +40,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── Python ──────────────────────────────────────────────────────────────
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -46,7 +48,6 @@ jobs:
       - name: Install Python test dependencies
         run: pip install -r tests/requirements.txt
 
-      # ── k6 ──────────────────────────────────────────────────────────────────
       - name: Install k6
         run: |
           sudo gpg -k
@@ -59,7 +60,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install k6
 
-      # ── Docker environment ───────────────────────────────────────────────────
       - name: Build Docker images
         run: docker compose build
 
@@ -70,15 +70,12 @@ jobs:
         run: python tests/wait_for_services.py
         timeout-minutes: 12
 
-      # ── Integration tests ────────────────────────────────────────────────────
       - name: Run integration tests
         run: pytest tests/integration/ -v --timeout=120
 
-      # ── E2E tests ────────────────────────────────────────────────────────────
       - name: Run E2E tests
         run: pytest tests/e2e/ -v --timeout=180
 
-      # ── Load tests ───────────────────────────────────────────────────────────
       - name: Run load tests (k6)
         run: |
           k6 run \
@@ -86,24 +83,27 @@ jobs:
             --env BASE_URL=http://localhost:8080 \
             tests/load/load_test.js
 
-      # ── Metrics validation ───────────────────────────────────────────────────
       - name: Validate Prometheus metrics after load
         run: python tests/metrics/check_metrics.py
 
-      # ── Consumer health under load ───────────────────────────────────────────
       - name: Check consumer health after load
         run: |
           STATUS=$(curl -sf http://localhost:9090/health | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if d['status']=='ok' else 1)" && echo ok || echo fail)
           echo "Consumer health: $STATUS"
           [ "$STATUS" = "ok" ]
 
-      # ── Artefacts ────────────────────────────────────────────────────────────
       - name: Upload load test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: load-test-results
           path: tests/load/results.json
+
+      - name: Collect service logs on failure
+        if: failure()
+        run: |
+          mkdir -p /tmp/docker-logs
+          docker compose logs --no-color > /tmp/docker-logs/all.log 2>&1 || true
 
       - name: Upload service logs
         if: failure()
@@ -112,13 +112,6 @@ jobs:
           name: service-logs
           path: /tmp/docker-logs/
 
-      - name: Collect service logs on failure
-        if: failure()
-        run: |
-          mkdir -p /tmp/docker-logs
-          docker compose logs --no-color > /tmp/docker-logs/all.log 2>&1 || true
-
-      # ── Teardown ─────────────────────────────────────────────────────────────
       - name: Teardown
         if: always()
         run: docker compose down -v

@@ -1,4 +1,3 @@
-"""Shared pytest fixtures for integration and E2E test suites."""
 import time
 
 import pytest
@@ -26,7 +25,6 @@ def prometheus_url():
 
 @pytest.fixture(scope="session")
 def cassandra_session():
-    """Return a live Cassandra session connected to the warehouse keyspace."""
     from cassandra.cluster import Cluster
     from cassandra.policies import DCAwareRoundRobinPolicy
 
@@ -43,7 +41,6 @@ def cassandra_session():
 
 def wait_for_metric_increment(prom_url: str, query: str, initial: float,
                                timeout: int = 30, interval: int = 2) -> bool:
-    """Poll Prometheus until *query* returns a value strictly greater than *initial*."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         val = _prom_scalar(prom_url, query)

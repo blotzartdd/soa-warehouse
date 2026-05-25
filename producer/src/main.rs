@@ -348,6 +348,74 @@ async fn register_schema_with_retry(
     None
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use apache_avro::types::Value as AvroValue;
+
+    const V1_SCHEMA_STR: &str = r#"{
+        "type": "record", "name": "ProductReceived", "namespace": "warehouse",
+        "fields": [
+            {"name": "event_id",   "type": "string"},
+            {"name": "event_type", "type": "string"},
+            {"name": "timestamp",  "type": "string"},
+            {"name": "product_id", "type": "string"},
+            {"name": "zone_id",    "type": "string"},
+            {"name": "quantity",   "type": "long"}
+        ]
+    }"#;
+
+    fn sample_record(event_id: &str) -> AvroValue {
+        AvroValue::Record(vec![
+            ("event_id".to_string(),   AvroValue::String(event_id.to_string())),
+            ("event_type".to_string(), AvroValue::String("PRODUCT_RECEIVED".to_string())),
+            ("timestamp".to_string(),  AvroValue::String("2024-01-01T00:00:00Z".to_string())),
+            ("product_id".to_string(), AvroValue::String("P1".to_string())),
+            ("zone_id".to_string(),    AvroValue::String("Z1".to_string())),
+            ("quantity".to_string(),   AvroValue::Long(1)),
+        ])
+    }
+
+    #[test]
+    fn confluent_encode_magic_byte_is_zero() {
+        let schema = apache_avro::Schema::parse_str(V1_SCHEMA_STR).unwrap();
+        let bytes = confluent_encode(1, &schema, sample_record("e1")).unwrap();
+        assert_eq!(bytes[0], 0x00);
+    }
+
+    #[test]
+    fn confluent_encode_schema_id_big_endian() {
+        let schema_id: u32 = 0x0102_0304;
+        let schema = apache_avro::Schema::parse_str(V1_SCHEMA_STR).unwrap();
+        let bytes = confluent_encode(schema_id, &schema, sample_record("e2")).unwrap();
+        assert_eq!(u32::from_be_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]), schema_id);
+    }
+
+    #[test]
+    fn confluent_encode_payload_appended_after_header() {
+        let schema = apache_avro::Schema::parse_str(V1_SCHEMA_STR).unwrap();
+        let avro_only = apache_avro::to_avro_datum(&schema, sample_record("e3")).unwrap();
+        let framed = confluent_encode(1, &schema, sample_record("e3")).unwrap();
+        assert_eq!(framed.len(), 5 + avro_only.len());
+        assert_eq!(&framed[5..], avro_only.as_slice());
+    }
+
+    #[test]
+    fn confluent_encode_wrong_value_type_returns_error() {
+        let schema = apache_avro::Schema::parse_str(V1_SCHEMA_STR).unwrap();
+        let result = confluent_encode(1, &schema, AvroValue::String("not-a-record".to_string()));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn confluent_encode_header_always_five_bytes() {
+        let schema = apache_avro::Schema::parse_str(V1_SCHEMA_STR).unwrap();
+        let bytes = confluent_encode(0, &schema, sample_record("e4")).unwrap();
+        assert!(bytes.len() >= 5);
+        assert_eq!(&bytes[1..5], &[0, 0, 0, 0]);
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenv().ok();

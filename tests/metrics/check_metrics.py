@@ -1,32 +1,14 @@
 #!/usr/bin/env python3
-"""
-Validate Prometheus metrics after a load test run.
-
-Checks (CI fails with exit code 1 if any condition is violated):
-  1. Event processing error rate < 1%
-     Metric: cassandra_write_errors_total / (events_processed_total + cassandra_write_errors_total)
-
-  2. Event processing p95 latency < 500 ms
-     Metric: histogram_quantile(0.95, rate(event_processing_duration_seconds_bucket[2m]))
-
-  3. Consumer lag == 0 (all produced events consumed)
-     Metric: sum(consumer_lag)
-
-Thresholds are derived from SLOs defined in tests/README.md.
-"""
 import sys
 import time
 import requests
 
 PROMETHEUS_URL = "http://localhost:9091"
-WINDOW = "2m"          # evaluation window for rate-based queries
-MAX_WAIT = 60          # seconds to wait for lag to reach 0
+WINDOW = "2m"
+MAX_WAIT = 60
 
-
-# ── Prometheus helpers ────────────────────────────────────────────────────────
 
 def query(expr: str):
-    """Return scalar value from instant query, or None."""
     try:
         resp = requests.get(
             f"{PROMETHEUS_URL}/api/v1/query",
@@ -42,7 +24,6 @@ def query(expr: str):
 
 
 def wait_for_zero_lag(timeout: int = MAX_WAIT) -> float:
-    """Wait up to *timeout* seconds for consumer lag to reach 0.  Returns final lag."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         lag = query("sum(consumer_lag)") or 0.0
@@ -51,8 +32,6 @@ def wait_for_zero_lag(timeout: int = MAX_WAIT) -> float:
         time.sleep(5)
     return query("sum(consumer_lag)") or 0.0
 
-
-# ── Checks ────────────────────────────────────────────────────────────────────
 
 def check_error_rate(threshold: float = 0.01) -> bool:
     processed = query(f"sum(rate(events_processed_total[{WINDOW}]))") or 0.0
@@ -121,12 +100,9 @@ def check_consumer_lag() -> bool:
     lag = wait_for_zero_lag()
     ok  = lag == 0
     status = "PASS" if ok else "WARN"
-    # Lag can be non-zero if events were sent very recently; treat as warning
     print(f"  [{status}] Consumer lag: {lag:.0f} (target = 0)")
-    return True  # non-blocking warning, not a hard CI failure
+    return True
 
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main() -> int:
     print(f"Querying Prometheus at {PROMETHEUS_URL} …\n")
